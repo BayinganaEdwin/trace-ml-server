@@ -1,0 +1,19 @@
+# Model weights and checkpoints
+checkpoints/
+*.keras
+*.h5
+*.weights
+
+# Raw downloaded datasets (too large for git)
+raw_downloads/
+data/
+data_split/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# macOS
+.DS_Store
