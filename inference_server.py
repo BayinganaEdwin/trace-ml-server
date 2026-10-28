@@ -7,7 +7,6 @@ Loads the saved MobileNetV2 .keras model and exposes:
     Body: multipart/form-data  with field  "image"  (jpg/png)
     Returns:
       {
-        "isConstructionSite": true,
         "detectedStage": "concrete_poured",
         "confidenceScore": 0.91,
         "allScores": {
@@ -20,21 +19,16 @@ Loads the saved MobileNetV2 .keras model and exposes:
         "inferenceMs": 43
       }
 
-  Out-of-distribution detection
-    The model was trained only on construction images, so it cannot explicitly
-    say "this is not a construction site". We use Maximum Softmax Probability
-    (MSP) thresholding: if max(softmax) < CONFIDENCE_THRESHOLD, the image is
-    likely out-of-distribution (e.g. flowers, food, selfies) and
-    isConstructionSite is set to False.
-
   GET /health
     Returns { "status": "ok", "modelLoaded": true }
 
 Usage
 -----
-  cd model_training
-  source venv/bin/activate   # (or: python3 -m venv venv && pip install flask tensorflow pillow flask-cors)
+  pip install flask tensorflow pillow
   python inference_server.py
+
+  # or with gunicorn for production:
+  # gunicorn -w 1 -b 0.0.0.0:5001 "inference_server:create_app()"
 """
 
 import io
@@ -43,37 +37,20 @@ import time
 import pathlib
 import numpy as np
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask_cors import CORS  # pip install flask-cors
 
 # ── Config ────────────────────────────────────────────────────────────────────
-# Use path relative to THIS file so the server works regardless of launch directory
-_HERE         = pathlib.Path(__file__).parent.resolve()
-MODEL_PATH    = _HERE / "checkpoints" / "best_model.keras"
+MODEL_PATH    = pathlib.Path("checkpoints/best_model.keras")
 IMG_SIZE      = (224, 224)
 MODEL_VERSION = "mobilenetv2-v1"
 PORT          = int(os.environ.get("INFERENCE_PORT", 5001))
-
-# Out-of-distribution threshold.
-# If max(softmax) < this value the image is likely NOT a construction site.
-#
-# Why 0.80?  MobileNetV2 was trained ONLY on construction images, so it will
-# produce softmax scores for any image — even waterfalls, selfies, or food.
-# A well-trained model should score 85-95%+ on real construction photos.
-# Raising this to 0.80 catches "confidently wrong" predictions on unrelated
-# images (like waterfall→concrete_poured at 75%) while still passing real
-# construction photos with a comfortable margin.
-#
-# The REAL fix is to retrain with non-construction (negative) examples so
-# the model learns to say "I don't know" on out-of-domain images.
-# Use prepare_negatives.py to download negatives, then re-run train.py.
-CONFIDENCE_THRESHOLD = 0.80
 
 CLASS_NAMES = [
     "formwork_erected",
     "reinforcement_placed",
     "concrete_poured",
     "structure_complete",
-    "not_construction",   # added after retraining with diverse negative examples
+    "not_construction",
 ]
 
 # ── Lazy-load model ───────────────────────────────────────────────────────────
@@ -105,21 +82,22 @@ def preprocess_image(file_bytes: bytes) -> np.ndarray:
     return np.expand_dims(arr, axis=0)
 
 
-# ── Fallback (model not loaded) ───────────────────────────────────────────────
-def model_not_ready() -> dict:
+# ── Dummy predictor (used when model not loaded) ──────────────────────────────
+def dummy_predict() -> dict:
     """
-    Returns a zero-confidence result when the model hasn't been loaded.
-    The Node.js backend treats 'dummy-random' modelVersion as invalid and
-    ignores this result, so the report stays 'pending' rather than getting
-    a fake score.
+    Returns a plausible random prediction.
+    Useful for testing the API pipeline before training completes.
     """
+    import random
+    scores = np.random.dirichlet(np.ones(4) * 2).tolist()
+    idx = int(np.argmax(scores))
     return {
-        "detectedStage": None,
-        "confidenceScore": 0.0,
-        "allScores": {c: 0.0 for c in CLASS_NAMES},
-        "modelVersion": "dummy-random",   # signals to backend: ignore this
+        "detectedStage": CLASS_NAMES[idx],
+        "confidenceScore": round(scores[idx], 4),
+        "allScores": {c: round(s, 4) for c, s in zip(CLASS_NAMES, scores)},
+        "modelVersion": "dummy-random",
         "inferenceMs": 0,
-        "warning": "Model not loaded — run 'python train.py' first, then restart the server.",
+        "warning": "Model not loaded — returning random scores for testing",
     }
 
 
@@ -159,10 +137,10 @@ def create_app():
         if len(file_bytes) > 10 * 1024 * 1024:  # 10 MB cap
             return jsonify({"error": "Image too large (max 10 MB)"}), 413
 
-        # ── If model not ready, return zero-confidence result ─────────────
+        # ── If model not ready, return dummy ──────────────────────────────
         model = load_model()
         if model is None:
-            return jsonify(model_not_ready()), 200
+            return jsonify(dummy_predict()), 200
 
         # ── Inference ─────────────────────────────────────────────────────
         try:
@@ -174,42 +152,116 @@ def create_app():
             return jsonify({"error": f"Inference error: {str(e)}"}), 500
 
         idx = int(np.argmax(preds))
-        max_score = float(preds[idx])
         scores = {c: round(float(s), 4) for c, s in zip(CLASS_NAMES, preds)}
 
-        # ── Construction vs. not-construction detection ───────────────────
-        # After retraining with a 'not_construction' class, we check two things:
-        #   1. Explicit class prediction: if model picks 'not_construction', trust it.
-        #   2. MSP threshold fallback: if confidence is below threshold, flag it.
-        detected_class = CLASS_NAMES[idx]
-        is_explicit_negative = (detected_class == "not_construction")
-        is_construction = (not is_explicit_negative) and (max_score >= CONFIDENCE_THRESHOLD)
+        return jsonify({
+            "detectedStage":  CLASS_NAMES[idx],
+            "confidenceScore": round(float(preds[idx]), 4),
+            "allScores":      scores,
+            "modelVersion":   MODEL_VERSION,
+            "inferenceMs":    elapsed_ms,
+        })
 
-        if not is_construction:
-            reason = (
-                f"Model classified image as '{detected_class}' with {round(max_score * 100)}% confidence."
-                if is_explicit_negative
-                else f"Image does not appear to show a construction site "
-                     f"(max confidence {round(max_score * 100)}% — below {round(CONFIDENCE_THRESHOLD * 100)}% threshold)."
-            )
-            return jsonify({
-                "isConstructionSite": False,
-                "detectedStage":      None,
-                "confidenceScore":    round(max_score, 4),
-                "allScores":          scores,
-                "modelVersion":       MODEL_VERSION,
-                "inferenceMs":        elapsed_ms,
-                "observations":       reason,
-            })
+    @app.route("/compare", methods=["POST"])
+    def compare():
+        """
+        Compare two site photos to measure construction progress.
+
+        Accepts multipart/form-data with fields:
+          "image_a"  — previous report photo (bytes)
+          "image_b"  — current report photo  (bytes)
+
+        Returns:
+          {
+            "similarityScore": 0.82,      # cosine similarity of MobileNetV2 features [0–1]
+            "progressDelta":   0.18,      # 1 - similarity; higher = more change = more progress
+            "progressLabel":   "Moderate progress detected",
+            "stagnant":        false,     # true if delta < 0.05 (almost identical photos)
+            "inferenceMs":     38
+          }
+
+        Works even when model is not loaded — falls back to pixel-level SSIM.
+        """
+        if "image_a" not in request.files or "image_b" not in request.files:
+            return jsonify({"error": "Both 'image_a' and 'image_b' fields are required"}), 400
+
+        bytes_a = request.files["image_a"].read()
+        bytes_b = request.files["image_b"].read()
+
+        if len(bytes_a) > 10 * 1024 * 1024 or len(bytes_b) > 10 * 1024 * 1024:
+            return jsonify({"error": "Images must be under 10 MB each"}), 413
+
+        t0 = time.time()
+        model = load_model()
+
+        if model is not None:
+            # ── Extract feature vectors from MobileNetV2 backbone ─────────────
+            import tensorflow as tf
+
+            # Build feature extractor once and cache it
+            if not hasattr(compare, "_extractor"):
+                # Remove the final classification head; output is (1, 7, 7, 1280) → GlobalAvgPool → (1, 1280)
+                base = model.layers[0] if hasattr(model.layers[0], "layers") else model
+                # Walk to the GlobalAveragePooling layer output
+                for layer in model.layers:
+                    if "global_average" in layer.name.lower():
+                        compare._extractor = tf.keras.Model(
+                            inputs=model.input,
+                            outputs=layer.output
+                        )
+                        break
+                else:
+                    # Fallback: use second-to-last layer
+                    compare._extractor = tf.keras.Model(
+                        inputs=model.input,
+                        outputs=model.layers[-2].output
+                    )
+
+            extractor = compare._extractor
+            tensor_a  = preprocess_image(bytes_a)
+            tensor_b  = preprocess_image(bytes_b)
+            feat_a    = extractor.predict(tensor_a, verbose=0)[0]
+            feat_b    = extractor.predict(tensor_b, verbose=0)[0]
+
+            # Cosine similarity
+            dot    = float(np.dot(feat_a, feat_b))
+            norm_a = float(np.linalg.norm(feat_a))
+            norm_b = float(np.linalg.norm(feat_b))
+            similarity = dot / (norm_a * norm_b + 1e-8)
+        else:
+            # ── Fallback: pixel-level mean absolute difference ────────────────
+            from PIL import Image
+            img_a = np.array(Image.open(io.BytesIO(bytes_a)).convert("RGB").resize(IMG_SIZE), dtype=np.float32) / 255.0
+            img_b = np.array(Image.open(io.BytesIO(bytes_b)).convert("RGB").resize(IMG_SIZE), dtype=np.float32) / 255.0
+            # Convert pixel diff to a similarity score [0–1]
+            mean_diff  = float(np.mean(np.abs(img_a - img_b)))
+            similarity = max(0.0, 1.0 - mean_diff * 4)   # scale so 25% avg diff → 0
+
+        elapsed_ms     = int((time.time() - t0) * 1000)
+        similarity     = round(float(np.clip(similarity, 0.0, 1.0)), 4)
+        progress_delta = round(1.0 - similarity, 4)
+
+        # ── Human-readable label ──────────────────────────────────────────────
+        if progress_delta < 0.05:
+            label   = "No visible progress — photos look identical"
+            stagnant = True
+        elif progress_delta < 0.15:
+            label   = "Minor progress detected"
+            stagnant = False
+        elif progress_delta < 0.30:
+            label   = "Moderate progress detected"
+            stagnant = False
+        else:
+            label   = "Significant progress detected"
+            stagnant = False
 
         return jsonify({
-            "isConstructionSite": True,
-            "detectedStage":      detected_class,
-            "confidenceScore":    round(max_score, 4),
-            "allScores":          scores,
-            "modelVersion":       MODEL_VERSION,
-            "inferenceMs":        elapsed_ms,
-            "observations":       f"Model detected {detected_class} with {round(max_score * 100)}% confidence.",
+            "similarityScore": similarity,
+            "progressDelta":   progress_delta,
+            "progressLabel":   label,
+            "stagnant":        stagnant,
+            "modelBacked":     model is not None,
+            "inferenceMs":     elapsed_ms,
         })
 
     @app.route("/predict/base64", methods=["POST"])
@@ -230,7 +282,7 @@ def create_app():
 
         model = load_model()
         if model is None:
-            return jsonify(model_not_ready()), 200
+            return jsonify(dummy_predict()), 200
 
         try:
             t0 = time.time()
@@ -241,37 +293,14 @@ def create_app():
             return jsonify({"error": f"Inference error: {str(e)}"}), 500
 
         idx = int(np.argmax(preds))
-        max_score = float(preds[idx])
         scores = {c: round(float(s), 4) for c, s in zip(CLASS_NAMES, preds)}
-        detected_class = CLASS_NAMES[idx]
-        is_explicit_negative = (detected_class == "not_construction")
-        is_construction = (not is_explicit_negative) and (max_score >= CONFIDENCE_THRESHOLD)
-
-        if not is_construction:
-            reason = (
-                f"Model classified image as '{detected_class}' with {round(max_score * 100)}% confidence."
-                if is_explicit_negative
-                else f"Image does not appear to show a construction site "
-                     f"(max confidence {round(max_score * 100)}% — below threshold)."
-            )
-            return jsonify({
-                "isConstructionSite": False,
-                "detectedStage":      None,
-                "confidenceScore":    round(max_score, 4),
-                "allScores":          scores,
-                "modelVersion":       MODEL_VERSION,
-                "inferenceMs":        elapsed_ms,
-                "observations":       reason,
-            })
 
         return jsonify({
-            "isConstructionSite": True,
-            "detectedStage":      detected_class,
-            "confidenceScore":    round(max_score, 4),
-            "allScores":          scores,
-            "modelVersion":       MODEL_VERSION,
-            "inferenceMs":        elapsed_ms,
-            "observations":       f"Model detected {detected_class} with {round(max_score * 100)}% confidence.",
+            "detectedStage":  CLASS_NAMES[idx],
+            "confidenceScore": round(float(preds[idx]), 4),
+            "allScores":      scores,
+            "modelVersion":   MODEL_VERSION,
+            "inferenceMs":    elapsed_ms,
         })
 
     return app
