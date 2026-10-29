@@ -311,3 +311,13 @@ if __name__ == "__main__":
     print(f"[INFO] Starting inference server on port {PORT}")
     app = create_app()
     app.run(host="0.0.0.0", port=PORT, debug=False)
+
+
+@app.route("/version", methods=["GET"])
+def version():
+    """Return model version and class list."""
+    return jsonify({
+        "modelVersion": MODEL_VERSION,
+        "classes": CLASS_NAMES,
+        "imgSize": list(IMG_SIZE),
+    })
