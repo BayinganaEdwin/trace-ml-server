@@ -321,3 +321,7 @@ def version():
         "classes": CLASS_NAMES,
         "imgSize": list(IMG_SIZE),
     })
+
+# Configure structured logging for production environments
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
