@@ -325,3 +325,9 @@ def version():
 # Configure structured logging for production environments
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+def is_allowed_image(filename: str) -> bool:
+    """Check if the uploaded file has an allowed image extension."""
+    return pathlib.Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
