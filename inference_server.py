@@ -331,3 +331,8 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 def is_allowed_image(filename: str) -> bool:
     """Check if the uploaded file has an allowed image extension."""
     return pathlib.Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+
+# Timing breakdown fields in /predict response:
+# preprocess_ms  — image decode + resize + normalize
+# inference_ms   — model.predict() call only
+# total_ms       — full request handler duration (not yet exposed; planned)
