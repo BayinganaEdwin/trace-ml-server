@@ -369,3 +369,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Accuracy targets by training phase:
+# Phase 1 (frozen base):   val_accuracy >= 0.80 within 10 epochs
+# Phase 2 (fine-tuned):    val_accuracy >= 0.90 within 20 epochs
+# If targets not met, review dataset balance and augmentation parameters.
