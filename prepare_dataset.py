@@ -341,3 +341,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Class distribution should be roughly balanced.
+# Minimum recommended: 200 images per class for initial training.
+# Use prepare_negatives.py to supplement the not_construction class.
