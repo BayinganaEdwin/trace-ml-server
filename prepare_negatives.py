@@ -238,3 +238,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Network errors during download are non-fatal: failed images are skipped
+# and a success/failure summary is printed at completion.
+# Re-run the script to retry any failed downloads.
