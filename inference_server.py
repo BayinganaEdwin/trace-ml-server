@@ -336,3 +336,8 @@ def is_allowed_image(filename: str) -> bool:
 # preprocess_ms  — image decode + resize + normalize
 # inference_ms   — model.predict() call only
 # total_ms       — full request handler duration (not yet exposed; planned)
+
+# Memory note for /compare endpoint:
+# The feature extractor sub-model is built once and cached as _feature_extractor.
+# Avoids rebuilding the model graph on every request.
+# Approximate memory footprint: ~14 MB for MobileNetV2 feature extractor.
