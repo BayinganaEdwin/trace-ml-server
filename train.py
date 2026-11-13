@@ -374,3 +374,7 @@ if __name__ == "__main__":
 # Phase 1 (frozen base):   val_accuracy >= 0.80 within 10 epochs
 # Phase 2 (fine-tuned):    val_accuracy >= 0.90 within 20 epochs
 # If targets not met, review dataset balance and augmentation parameters.
+
+# EarlyStopping is applied in Phase 2 (fine-tuning) to prevent overfitting.
+# patience=5: training halts if val_accuracy does not improve for 5 epochs.
+# restore_best_weights=True ensures the saved model is from the best epoch.
