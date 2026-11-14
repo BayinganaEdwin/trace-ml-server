@@ -341,3 +341,7 @@ def is_allowed_image(filename: str) -> bool:
 # The feature extractor sub-model is built once and cached as _feature_extractor.
 # Avoids rebuilding the model graph on every request.
 # Approximate memory footprint: ~14 MB for MobileNetV2 feature extractor.
+
+# CORS is globally enabled via flask-cors for local development.
+# In production, restrict origins to the backend server's IP/domain:
+# CORS(app, origins=["https://api.yourdomain.com"])
