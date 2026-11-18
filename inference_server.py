@@ -345,3 +345,9 @@ def is_allowed_image(filename: str) -> bool:
 # CORS is globally enabled via flask-cors for local development.
 # In production, restrict origins to the backend server's IP/domain:
 # CORS(app, origins=["https://api.yourdomain.com"])
+
+# Production deployment:
+# Use exactly 1 gunicorn worker (-w 1) because TensorFlow's global model state
+# is not safe to share across forked processes. Multiple concurrent requests
+# are served via async I/O within the single worker.
+# Command: gunicorn -w 1 -b 0.0.0.0:5001 "inference_server:create_app()"
