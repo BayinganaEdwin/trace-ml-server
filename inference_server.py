@@ -85,16 +85,21 @@ def preprocess_image(file_bytes: bytes) -> np.ndarray:
 # ── Dummy predictor (used when model not loaded) ──────────────────────────────
 def dummy_predict() -> dict:
     """
-    Returns a plausible random prediction across all 5 classes (including
-    not_construction). Used when the model file is absent or fails to load.
+    Returns a plausible random prediction across the 4 construction classes.
+    not_construction is intentionally excluded — the dummy model has no real
+    ability to distinguish construction from non-construction images, so
+    including it would randomly flag genuine site photos. The real trained
+    model handles not_construction correctly.
     """
-    # Include all 5 classes so not_construction can be returned (~20% chance)
-    scores = np.random.dirichlet(np.ones(5) * 2).tolist()
+    construction_classes = CLASS_NAMES[:4]  # exclude not_construction
+    scores = np.random.dirichlet(np.ones(4) * 2).tolist()
     idx = int(np.argmax(scores))
+    all_scores = {c: round(s, 4) for c, s in zip(construction_classes, scores)}
+    all_scores["not_construction"] = 0.0
     return {
-        "detectedStage": CLASS_NAMES[idx],
+        "detectedStage": construction_classes[idx],
         "confidenceScore": round(scores[idx], 4),
-        "allScores": {c: round(s, 4) for c, s in zip(CLASS_NAMES, scores)},
+        "allScores": all_scores,
         "modelVersion": "dummy-random",
         "inferenceMs": 0,
         "warning": "Model not loaded — returning random scores for testing",
