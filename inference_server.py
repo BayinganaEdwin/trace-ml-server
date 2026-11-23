@@ -85,11 +85,11 @@ def preprocess_image(file_bytes: bytes) -> np.ndarray:
 # ── Dummy predictor (used when model not loaded) ──────────────────────────────
 def dummy_predict() -> dict:
     """
-    Returns a plausible random prediction.
-    Useful for testing the API pipeline before training completes.
+    Returns a plausible random prediction across all 5 classes (including
+    not_construction). Used when the model file is absent or fails to load.
     """
-    import random
-    scores = np.random.dirichlet(np.ones(4) * 2).tolist()
+    # Include all 5 classes so not_construction can be returned (~20% chance)
+    scores = np.random.dirichlet(np.ones(5) * 2).tolist()
     idx = int(np.argmax(scores))
     return {
         "detectedStage": CLASS_NAMES[idx],
