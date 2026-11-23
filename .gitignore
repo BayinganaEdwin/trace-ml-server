@@ -1,6 +1,6 @@
-# Model weights and checkpoints
-checkpoints/
-*.keras
+# Model weights and checkpoints — exclude everything except the production model
+checkpoints/*
+!checkpoints/best_model.keras
 *.h5
 *.weights
 
