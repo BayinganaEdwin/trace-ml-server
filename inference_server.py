@@ -106,8 +106,14 @@ def create_app():
     app = Flask(__name__)
     CORS(app)  # allow Node.js backend on different port to call this
 
-    # Pre-load on startup
-    load_model()
+    # Pre-load on startup — catch errors so the server still starts even if the
+    # model file is missing or the Keras version doesn't match the saved weights.
+    # In that case all /predict calls fall back to dummy_predict().
+    try:
+        load_model()
+    except Exception as e:
+        print(f"[WARN] Model could not be pre-loaded: {e}")
+        print("[WARN] Server starting without model — /predict will return dummy scores.")
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -303,6 +309,15 @@ def create_app():
             "inferenceMs":    elapsed_ms,
         })
 
+    @app.route("/version", methods=["GET"])
+    def version():
+        """Return model version and class list."""
+        return jsonify({
+            "modelVersion": MODEL_VERSION,
+            "classes": CLASS_NAMES,
+            "imgSize": list(IMG_SIZE),
+        })
+
     return app
 
 
@@ -311,16 +326,6 @@ if __name__ == "__main__":
     print(f"[INFO] Starting inference server on port {PORT}")
     app = create_app()
     app.run(host="0.0.0.0", port=PORT, debug=False)
-
-
-@app.route("/version", methods=["GET"])
-def version():
-    """Return model version and class list."""
-    return jsonify({
-        "modelVersion": MODEL_VERSION,
-        "classes": CLASS_NAMES,
-        "imgSize": list(IMG_SIZE),
-    })
 
 # Configure structured logging for production environments
 import logging
